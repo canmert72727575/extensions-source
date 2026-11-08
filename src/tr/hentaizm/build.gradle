@@ -1,8 +1,11 @@
 ext {
     extName = 'HentaiZM'
     extClass = '.HentaiZM'
-    extVersionCode = 10
+    extVersionCode = 11
     isNsfw = true
 }
 
 apply from: "$rootDir/common.gradle"
+dependencies {
+    implementation(project(':lib:okru-extractor'))
+}
