@@ -283,7 +283,7 @@ class HentaiZM : ParsedAnimeHttpSource(), ConfigurableAnimeSource {
 
         val arr = json.optJSONArray("videos")
         if (arr == null || arr.length() == 0) {
-            errors += "okmeta=bos:" + json.keys().asSequence().take(5).joinToString(",")
+            errors += "okmeta=" + json.optString("error").ifBlank { json.keys().asSequence().take(4).joinToString(",") }
             return emptyList()
         }
 
@@ -296,6 +296,9 @@ class HentaiZM : ParsedAnimeHttpSource(), ConfigurableAnimeSource {
             Video(url, "OK.ru ${okruQualities[name] ?: name}", url, headers = playHeaders)
         }
     }
+
+    // Site kaynak adini tersine cevirip saklıyor, video kodu da ters olabilir: ikisini de dene
+    private fun idCandidates(id: String) = listOf(id.reversed(), id).distinct()
 
     override fun videoListParse(response: Response): List<Video> {
         val doc = response.asJsoup()
@@ -315,17 +318,23 @@ class HentaiZM : ParsedAnimeHttpSource(), ConfigurableAnimeSource {
 
         // Once VIP (Ok.ru) kaynagi
         val okru = sources.filter { it.first == "okru" }.flatMap { (_, id) ->
-            runCatching { okruVideos(id, errors) }
-                .onFailure { errors += "okru=${it.short()}" }
-                .getOrDefault(emptyList())
+            idCandidates(id).firstNotNullOfOrNull { cand ->
+                runCatching { okruVideos(cand, errors) }
+                    .onFailure { errors += "okru=${it.short()}" }
+                    .getOrNull()?.takeIf { it.isNotEmpty() }
+            } ?: emptyList()
         }
         if (okru.isNotEmpty()) return okru
 
         // Ok.ru bos donerse yedek olarak Videa (Sidonia)
-        val videa = sources.filter { it.first == "videa" }.flatMap { (_, id) -> videaVideos(id, errors) }
+        val videa = sources.filter { it.first == "videa" }.flatMap { (_, id) ->
+            idCandidates(id).firstNotNullOfOrNull { cand ->
+                videaVideos(cand, errors).takeIf { it.isNotEmpty() }
+            } ?: emptyList()
+        }
         if (videa.isNotEmpty()) return videa
 
-        throw Exception("T: " + errors.joinToString(" "))
+        throw Exception("T: " + errors.distinct().joinToString(" "))
     }
 
     private fun videaVideos(id: String, errors: MutableList<String>): List<Video> {
