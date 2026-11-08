@@ -1,0 +1,48 @@
+name: Probe 6
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: OkRu
+        run: |
+          UA="Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+          OK=16171433986575
+          for REF in "https://rcdn.asyazin.com/" "https://www.hentaizm2.com/"; do
+            echo "=== embed sayfasi, referer $REF ==="
+            curl -sL -o emb.html -w "HTTP %{http_code} boyut %{size_download}\n" -A "$UA" -H "Referer: $REF" -H "Sec-Fetch-Dest: iframe" -H "Sec-Fetch-Mode: navigate" -H "Sec-Fetch-Site: cross-site" -H "Accept: text/html,application/xhtml+xml" -H "Accept-Language: tr-TR,tr;q=0.9" "https://ok.ru/videoembed/$OK"
+            echo "data-options sayisi: $(grep -c 'data-options' emb.html)"
+            echo "baslik: $(grep -o '<title>[^<]*' emb.html | head -1)"
+            grep -o -i -E 'accessDenied|movieBlocked|notFound|blocked|restricted' emb.html | sort | uniq -c | head -6
+          done
+          for REF in "https://rcdn.asyazin.com/" "https://www.hentaizm2.com/"; do
+            echo "=== bilgi adresi POST, referer $REF ==="
+            curl -sL -w "\nHTTP %{http_code}\n" -A "$UA" -X POST -H "Referer: $REF" -H "Origin: ${REF%/}" -d "mid=$OK" "https://ok.ru/dk?cmd=videoPlayerMetadata&mid=$OK" | head -c 700
+          done
+
+      - name: Videa
+        run: |
+          UA="Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+          VD=2RP3wV7BR7GpcOOV
+          echo "=== videa proxy ==="
+          curl -sL -w "\nHTTP %{http_code}\n" -A "$UA" -H "Referer: https://rcdn.asyazin.com/?id=$VD&source=videa" "https://rcdn.asyazin.com/proxy.php?source=videa_player&id=$VD" | head -c 3000
+          echo
+          echo "=== videa cozucu ==="
+          curl -sL -w "\nHTTP %{http_code}\n" -A "$UA" -H "Referer: https://rcdn.asyazin.com/?id=$VD&source=videa" "https://rcdn.asyazin.com/resolver.php?id=$VD&source=videa" | head -c 800
+
+      - name: Abyss
+        run: |
+          UA="Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+          AB=Hu1Q8p0lJ
+          for REF in "https://www.hentaizm2.com/" "https://rcdn.asyazin.com/"; do
+            echo "=== abyss, referer $REF ==="
+            curl -sL -o ab.html -w "HTTP %{http_code} boyut %{size_download}\n" -A "$UA" -H "Referer: $REF" "https://oynat.asyaturk.org/?v=$AB"
+            echo "baslik: $(grep -o '<title>[^<]*' ab.html | head -1)"
+            grep -o -E '<script[^>]*src="[^"]+"' ab.html | head -6
+            grep -o -i -E 'atob\([^)]{0,60}|m3u8[^ <>"]{0,80}|fetch\([^)]{0,100}|abysscdn[^ <>"]{0,60}|<iframe[^>]{0,120}' ab.html | head -10
+          done
+          echo "=== abyss ilk 800 karakter ==="
+          head -c 800 ab.html
