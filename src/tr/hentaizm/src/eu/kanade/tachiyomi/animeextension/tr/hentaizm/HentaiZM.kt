@@ -12,6 +12,7 @@ import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.animesource.online.ParsedAnimeHttpSource
+import eu.kanade.tachiyomi.lib.okruextractor.OkruExtractor
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.awaitSuccess
 import eu.kanade.tachiyomi.util.asJsoup
@@ -239,6 +240,7 @@ class HentaiZM : ParsedAnimeHttpSource(), ConfigurableAnimeSource {
 
     // ============================ Video Links =============================
     private val videaExtractor by lazy { VideaExtractor(client) }
+    private val okruExtractor by lazy { OkruExtractor(client) }
 
     // Site kaynak adini ve video kodunu base64 ile sakliyor (kaynak adi ayrica tersine cevrilmis)
     private fun decode(value: String): String {
@@ -249,16 +251,23 @@ class HentaiZM : ParsedAnimeHttpSource(), ConfigurableAnimeSource {
     override fun videoListParse(response: Response): List<Video> {
         val doc = response.asJsoup()
 
-        return doc.select("button.alt-btn").flatMap { btn ->
+        // Her butondan (kaynak adi, video kodu) cifti cikar
+        val sources = doc.select("button.alt-btn").mapNotNull { btn ->
             runCatching {
-                val provider = decode(btn.attr("data-provider")).reversed()
-                val id = decode(btn.attr("data-videoid"))
-                when (provider) {
-                    "videa" -> videaVideos(id)
-                    else -> emptyList() // abyss ve okru henuz desteklenmiyor
-                }
+                decode(btn.attr("data-provider")).reversed() to decode(btn.attr("data-videoid"))
+            }.getOrNull()
+        }
+
+        // Once VIP (Ok.ru) kaynagi, cunku Videa'dan cok daha hizli
+        val okru = sources.filter { it.first == "okru" }.flatMap { (_, id) ->
+            runCatching {
+                okruExtractor.videosFromUrl("https://ok.ru/videoembed/$id")
             }.getOrDefault(emptyList())
         }
+        if (okru.isNotEmpty()) return okru
+
+        // Ok.ru bos donerse yedek olarak Videa (Sidonia)
+        return sources.filter { it.first == "videa" }.flatMap { (_, id) -> videaVideos(id) }
     }
 
     private fun videaVideos(id: String): List<Video> {
