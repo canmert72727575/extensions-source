@@ -1,0 +1,36 @@
+name: Probe 5
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: OkRu
+        run: |
+          MOB="Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"
+          DESK="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
+          OK=57568933417161
+          for UA in "$MOB" "$DESK"; do
+            echo "=== embed sayfasi: ${UA:0:30} ==="
+            CODE=$(curl -sL -o emb.html -w "%{http_code}" -A "$UA" -H "Referer: https://rcdn.asyazin.com/" "https://ok.ru/videoembed/$OK")
+            echo "HTTP $CODE boyut $(wc -c < emb.html) data-options sayisi: $(grep -c 'data-options' emb.html)"
+            echo "baslik: $(grep -o '<title>[^<]*' emb.html | head -1)"
+            grep -o -i -E 'blocked[^"<]{0,60}|not.found[^"<]{0,60}|unavailable[^"<]{0,60}|error[^"<]{0,60}' emb.html | head -5
+          done
+          echo "=== bilgi adresi POST, mobil ==="
+          curl -sL -w "\nHTTP %{http_code}\n" -A "$MOB" -X POST -H "Origin: https://rcdn.asyazin.com" -H "Referer: https://rcdn.asyazin.com/" -d "mid=$OK" "https://ok.ru/dk?cmd=videoPlayerMetadata&mid=$OK" | head -c 800
+          echo
+          echo "=== bilgi adresi POST, masaustu ==="
+          curl -sL -w "\nHTTP %{http_code}\n" -A "$DESK" -X POST -d "mid=$OK" "https://ok.ru/dk?cmd=videoPlayerMetadata&mid=$OK" | head -c 800
+
+      - name: Videa ve Abyss
+        run: |
+          MOB="Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"
+          VD=VOOcpG7RB7Vw3PR2
+          echo "=== videa proxy ==="
+          curl -sL -w "\nHTTP %{http_code}\n" -A "$MOB" -H "Referer: https://rcdn.asyazin.com/?id=$VD&source=videa" "https://rcdn.asyazin.com/proxy.php?source=videa_player&id=$VD" | head -c 3000
+          echo
+          echo "=== abyss ==="
+          curl -sL -w "\nHTTP %{http_code}\n" -A "$MOB" -H "Referer: https://www.hentaizm2.com/" "https://oynat.asyaturk.org/?v=Jl0p8Q1uH" | head -c 1500
