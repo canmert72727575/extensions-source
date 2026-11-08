@@ -4,7 +4,6 @@ import android.app.Application
 import android.util.Base64
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
-import eu.kanade.tachiyomi.animeextension.tr.hentaizm.extractors.VideaExtractor
 import eu.kanade.tachiyomi.animesource.ConfigurableAnimeSource
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
 import eu.kanade.tachiyomi.animesource.model.AnimesPage
@@ -13,10 +12,8 @@ import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.animesource.online.ParsedAnimeHttpSource
 import eu.kanade.tachiyomi.network.GET
-import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.awaitSuccess
 import eu.kanade.tachiyomi.util.asJsoup
-import okhttp3.FormBody
 import okhttp3.Headers
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
@@ -241,13 +238,14 @@ class HentaiZM : ParsedAnimeHttpSource(), ConfigurableAnimeSource {
     }
 
     // ============================ Video Links =============================
-    private val videaExtractor by lazy { VideaExtractor(client) }
-
-    // Site kaynak adini ve video kodunu base64 ile sakliyor (kaynak adi ayrica tersine cevrilmis)
+    // Site kaynak adini ve video kodunu base64 ile saklıyor. Ikisi de ters cevrilmis.
     private fun decode(value: String): String {
         val padded = value.padEnd((value.length + 3) / 4 * 4, '=')
         return String(Base64.decode(padded, Base64.URL_SAFE))
     }
+
+    // Kod ters saklaniyor ama emin olmak icin duzunu da dene
+    private fun idCandidates(id: String) = listOf(id.reversed(), id).distinct()
 
     private fun Throwable.short(): String {
         val base = javaClass.simpleName.removeSuffix("Exception").removeSuffix("Error")
@@ -258,47 +256,43 @@ class HentaiZM : ParsedAnimeHttpSource(), ConfigurableAnimeSource {
         return if (cls.isNotBlank()) "$base:$meth@$cls".take(70) else "$base:${msg.take(45)}"
     }
 
-    private val okruQualities = mapOf(
-        "mobile" to "240p",
-        "lowest" to "360p",
-        "low" to "480p",
-        "sd" to "576p",
-        "hd" to "720p",
-        "full" to "1080p",
-        "quad" to "1440p",
-        "ultra" to "2160p",
-    )
-
-    // Sitenin kendi yaptigi gibi ok.ru'nun bilgi adresini cagirip video linklerini al
-    private fun okruVideos(id: String, errors: MutableList<String>): List<Video> {
+    // Sitenin kendi cozucusu: dogru video kodunu verince dogrudan video linklerini donuyor
+    private fun resolverVideos(source: String, id: String, label: String, errors: MutableList<String>): List<Video> {
         val reqHeaders = headersBuilder()
-            .set("Origin", "https://rcdn.asyazin.com")
-            .set("Referer", "https://rcdn.asyazin.com/")
+            .removeAll("Origin")
+            .set("Referer", "https://rcdn.asyazin.com/?id=$id&source=$source")
             .build()
-        val body = FormBody.Builder().add("mid", id).build()
 
         val json = client.newCall(
-            POST("https://ok.ru/dk?cmd=videoPlayerMetadata&mid=$id", reqHeaders, body),
+            GET("https://rcdn.asyazin.com/resolver.php?id=$id&source=$source", reqHeaders),
         ).execute().use { it.jsonBody() }
 
-        val arr = json.optJSONArray("videos")
-        if (arr == null || arr.length() == 0) {
-            errors += "okmeta=" + json.optString("error").ifBlank { json.keys().asSequence().take(4).joinToString(",") }
+        if (json.optString("status") != "success") {
+            errors += "res=" + json.optString("message").take(25).ifBlank { "hata" }
             return emptyList()
         }
 
-        val playHeaders = Headers.Builder().add("User-Agent", headers["User-Agent"] ?: "").build()
-        return (0 until arr.length()).mapNotNull { i ->
-            val v = arr.getJSONObject(i)
-            val url = v.optString("url")
-            if (url.isBlank()) return@mapNotNull null
-            val name = v.optString("name")
-            Video(url, "OK.ru ${okruQualities[name] ?: name}", url, headers = playHeaders)
-        }
-    }
+        val playHeaders = Headers.Builder()
+            .add("User-Agent", headers["User-Agent"] ?: "")
+            .add("Referer", "https://rcdn.asyazin.com/")
+            .build()
 
-    // Site kaynak adini tersine cevirip saklıyor, video kodu da ters olabilir: ikisini de dene
-    private fun idCandidates(id: String) = listOf(id.reversed(), id).distinct()
+        val result = mutableListOf<Video>()
+        val arr = json.optJSONArray("sources")
+        if (arr != null) {
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                if (o.optString("type") == "iframe") continue
+                var url = o.optString("src")
+                if (url.isBlank()) continue
+                if (url.startsWith("//")) url = "https:$url"
+                val quality = o.optString("quality").ifBlank { "Orijinal" }
+                result += Video(url, "$label $quality", url, headers = playHeaders)
+            }
+        }
+        if (result.isEmpty()) errors += "res=kaynakyok"
+        return result
+    }
 
     override fun videoListParse(response: Response): List<Video> {
         val doc = response.asJsoup()
@@ -316,49 +310,17 @@ class HentaiZM : ParsedAnimeHttpSource(), ConfigurableAnimeSource {
             }.onFailure { errors += "cozme=${it.short()}" }.getOrNull()
         }
 
-        // Once VIP (Ok.ru) kaynagi
-        val okru = sources.filter { it.first == "okru" }.flatMap { (_, id) ->
-            idCandidates(id).firstNotNullOfOrNull { cand ->
-                runCatching { okruVideos(cand, errors) }
-                    .onFailure { errors += "okru=${it.short()}" }
-                    .getOrNull()?.takeIf { it.isNotEmpty() }
-            } ?: emptyList()
-        }
-        if (okru.isNotEmpty()) return okru
-
-        // Ok.ru bos donerse yedek olarak Videa (Sidonia)
+        // Videa (Sidonia): sitenin cozucusunden dogrudan MP4 linkleri geliyor
         val videa = sources.filter { it.first == "videa" }.flatMap { (_, id) ->
             idCandidates(id).firstNotNullOfOrNull { cand ->
-                videaVideos(cand, errors).takeIf { it.isNotEmpty() }
+                runCatching { resolverVideos("videa", cand, "Videa", errors) }
+                    .onFailure { errors += "videa=${it.short()}" }
+                    .getOrNull()?.takeIf { it.isNotEmpty() }
             } ?: emptyList()
         }
         if (videa.isNotEmpty()) return videa
 
         throw Exception("T: " + errors.distinct().joinToString(" "))
-    }
-
-    private fun videaVideos(id: String, errors: MutableList<String>): List<Video> {
-        val direct = runCatching {
-            videaExtractor.videosFromUrl("https://videa.hu/player?v=$id")
-        }.onFailure { errors += "videa=${it.short()}" }.getOrDefault(emptyList())
-        if (direct.isNotEmpty()) return direct
-        if (errors.none { it.startsWith("videa=") }) errors += "videa=bos"
-
-        // Olmazsa sitenin kendi oynatici sayfasindaki iframe'i dene
-        val iframeSrc = runCatching {
-            client.newCall(GET("https://rcdn.asyazin.com/?id=$id&source=videa", headers))
-                .execute()
-                .asJsoup()
-                .selectFirst("iframe")?.attr("abs:src")
-        }.onFailure { errors += "wrap=${it.short()}" }.getOrNull()
-
-        if (iframeSrc.isNullOrBlank()) {
-            if (errors.none { it.startsWith("wrap=") }) errors += "wrap=iframeyok"
-            return emptyList()
-        }
-        return runCatching { videaExtractor.videosFromUrl(iframeSrc) }
-            .onFailure { errors += "ifr=${it.short()}" }
-            .getOrDefault(emptyList())
     }
 
     private val qualityRegex by lazy { Regex("""(\d+)p""") }
