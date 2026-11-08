@@ -248,30 +248,41 @@ class HentaiZM : ParsedAnimeHttpSource(), ConfigurableAnimeSource {
         return String(Base64.decode(padded, Base64.URL_SAFE))
     }
 
+    private fun Throwable.short() = javaClass.simpleName.removeSuffix("Exception").removeSuffix("Error")
+
     override fun videoListParse(response: Response): List<Video> {
         val doc = response.asJsoup()
         val errors = mutableListOf<String>()
 
         val buttons = doc.select("button.alt-btn")
         if (buttons.isEmpty()) {
-            throw Exception("TEŞHİS: sayfada kaynak butonu yok (giriş gerekebilir). Sayfa başlığı: ${doc.title().take(50)}")
+            throw Exception("T: buton yok, başlık: ${doc.title().take(40)}")
         }
 
         // Her butondan (kaynak adi, video kodu) cifti cikar
         val sources = buttons.mapNotNull { btn ->
             runCatching {
                 decode(btn.attr("data-provider")).reversed() to decode(btn.attr("data-videoid"))
-            }.onFailure { errors += "çözme: ${it.message?.take(40)}" }.getOrNull()
+            }.onFailure { errors += "cozme=${it.short()}" }.getOrNull()
         }
 
         // Once VIP (Ok.ru) kaynagi
         val okru = sources.filter { it.first == "okru" }.flatMap { (_, id) ->
+            val url = "https://ok.ru/videoembed/$id"
+
+            // Teshis: ok.ru sayfasina dogrudan bak
             runCatching {
-                okruExtractor.videosFromUrl("https://ok.ru/videoembed/$id")
-            }.getOrElse {
-                errors += "okru: ${it.javaClass.simpleName} ${it.message?.take(60)}"
-                emptyList()
-            }
+                client.newCall(GET(url, headers)).execute().use { r ->
+                    val body = r.peekBody(Long.MAX_VALUE).string()
+                    errors += "ok.ru=${r.code},opt=${body.contains("data-options")}"
+                }
+            }.onFailure { errors += "ok.ru=${it.short()}" }
+
+            val list = runCatching { okruExtractor.videosFromUrl(url) }
+                .onFailure { errors += "okru=${it.short()}" }
+                .getOrDefault(emptyList())
+            if (list.isEmpty() && errors.none { it.startsWith("okru=") }) errors += "okru=bos"
+            list
         }
         if (okru.isNotEmpty()) return okru
 
@@ -279,17 +290,15 @@ class HentaiZM : ParsedAnimeHttpSource(), ConfigurableAnimeSource {
         val videa = sources.filter { it.first == "videa" }.flatMap { (_, id) -> videaVideos(id, errors) }
         if (videa.isNotEmpty()) return videa
 
-        throw Exception("TEŞHİS: video çıkmadı. Kaynaklar: ${sources.map { it.first }} | Hatalar: ${errors.joinToString(" ; ")}")
+        throw Exception("T: " + errors.joinToString(" "))
     }
 
     private fun videaVideos(id: String, errors: MutableList<String>): List<Video> {
         val direct = runCatching {
             videaExtractor.videosFromUrl("https://videa.hu/player?v=$id")
-        }.getOrElse {
-            errors += "videa: ${it.javaClass.simpleName} ${it.message?.take(60)}"
-            emptyList()
-        }
+        }.onFailure { errors += "videa=${it.short()}" }.getOrDefault(emptyList())
         if (direct.isNotEmpty()) return direct
+        if (errors.none { it.startsWith("videa=") }) errors += "videa=bos"
 
         // Olmazsa sitenin kendi oynatici sayfasindaki iframe'i dene
         val iframeSrc = runCatching {
@@ -297,19 +306,15 @@ class HentaiZM : ParsedAnimeHttpSource(), ConfigurableAnimeSource {
                 .execute()
                 .asJsoup()
                 .selectFirst("iframe")?.attr("abs:src")
-        }.getOrElse {
-            errors += "sarmalayıcı: ${it.javaClass.simpleName} ${it.message?.take(60)}"
-            null
-        }
+        }.onFailure { errors += "wrap=${it.short()}" }.getOrNull()
 
         if (iframeSrc.isNullOrBlank()) {
-            errors += "sarmalayıcıda iframe yok"
+            if (errors.none { it.startsWith("wrap=") }) errors += "wrap=iframeyok"
             return emptyList()
         }
-        return runCatching { videaExtractor.videosFromUrl(iframeSrc) }.getOrElse {
-            errors += "videa iframe: ${it.javaClass.simpleName} ${it.message?.take(60)}"
-            emptyList()
-        }
+        return runCatching { videaExtractor.videosFromUrl(iframeSrc) }
+            .onFailure { errors += "ifr=${it.short()}" }
+            .getOrDefault(emptyList())
     }
 
     private val qualityRegex by lazy { Regex("""(\d+)p""") }
