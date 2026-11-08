@@ -250,30 +250,45 @@ class HentaiZM : ParsedAnimeHttpSource(), ConfigurableAnimeSource {
 
     override fun videoListParse(response: Response): List<Video> {
         val doc = response.asJsoup()
+        val errors = mutableListOf<String>()
 
-        // Her butondan (kaynak adi, video kodu) cifti cikar
-        val sources = doc.select("button.alt-btn").mapNotNull { btn ->
-            runCatching {
-                decode(btn.attr("data-provider")).reversed() to decode(btn.attr("data-videoid"))
-            }.getOrNull()
+        val buttons = doc.select("button.alt-btn")
+        if (buttons.isEmpty()) {
+            throw Exception("TEŞHİS: sayfada kaynak butonu yok (giriş gerekebilir). Sayfa başlığı: ${doc.title().take(50)}")
         }
 
-        // Once VIP (Ok.ru) kaynagi, cunku Videa'dan cok daha hizli
+        // Her butondan (kaynak adi, video kodu) cifti cikar
+        val sources = buttons.mapNotNull { btn ->
+            runCatching {
+                decode(btn.attr("data-provider")).reversed() to decode(btn.attr("data-videoid"))
+            }.onFailure { errors += "çözme: ${it.message?.take(40)}" }.getOrNull()
+        }
+
+        // Once VIP (Ok.ru) kaynagi
         val okru = sources.filter { it.first == "okru" }.flatMap { (_, id) ->
             runCatching {
                 okruExtractor.videosFromUrl("https://ok.ru/videoembed/$id")
-            }.getOrDefault(emptyList())
+            }.getOrElse {
+                errors += "okru: ${it.javaClass.simpleName} ${it.message?.take(60)}"
+                emptyList()
+            }
         }
         if (okru.isNotEmpty()) return okru
 
         // Ok.ru bos donerse yedek olarak Videa (Sidonia)
-        return sources.filter { it.first == "videa" }.flatMap { (_, id) -> videaVideos(id) }
+        val videa = sources.filter { it.first == "videa" }.flatMap { (_, id) -> videaVideos(id, errors) }
+        if (videa.isNotEmpty()) return videa
+
+        throw Exception("TEŞHİS: video çıkmadı. Kaynaklar: ${sources.map { it.first }} | Hatalar: ${errors.joinToString(" ; ")}")
     }
 
-    private fun videaVideos(id: String): List<Video> {
+    private fun videaVideos(id: String, errors: MutableList<String>): List<Video> {
         val direct = runCatching {
             videaExtractor.videosFromUrl("https://videa.hu/player?v=$id")
-        }.getOrDefault(emptyList())
+        }.getOrElse {
+            errors += "videa: ${it.javaClass.simpleName} ${it.message?.take(60)}"
+            emptyList()
+        }
         if (direct.isNotEmpty()) return direct
 
         // Olmazsa sitenin kendi oynatici sayfasindaki iframe'i dene
@@ -282,11 +297,17 @@ class HentaiZM : ParsedAnimeHttpSource(), ConfigurableAnimeSource {
                 .execute()
                 .asJsoup()
                 .selectFirst("iframe")?.attr("abs:src")
-        }.getOrNull()
+        }.getOrElse {
+            errors += "sarmalayıcı: ${it.javaClass.simpleName} ${it.message?.take(60)}"
+            null
+        }
 
-        return if (!iframeSrc.isNullOrBlank()) {
-            runCatching { videaExtractor.videosFromUrl(iframeSrc) }.getOrDefault(emptyList())
-        } else {
+        if (iframeSrc.isNullOrBlank()) {
+            errors += "sarmalayıcıda iframe yok"
+            return emptyList()
+        }
+        return runCatching { videaExtractor.videosFromUrl(iframeSrc) }.getOrElse {
+            errors += "videa iframe: ${it.javaClass.simpleName} ${it.message?.take(60)}"
             emptyList()
         }
     }
