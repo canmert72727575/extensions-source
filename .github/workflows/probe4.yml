@@ -1,0 +1,29 @@
+name: Probe 4
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cozucu ve ok.ru
+        run: |
+          UA="Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"
+          OK=57568933417161
+          VD=VOOcpG7RB7Vw3PR2
+          echo "=== resolver okru, referer sarmalayici ==="
+          curl -sL -w "\nHTTP %{http_code}\n" -A "$UA" -H "Referer: https://rcdn.asyazin.com/?id=$OK&source=okru" "https://rcdn.asyazin.com/resolver.php?id=$OK&source=okru" | head -c 2500
+          echo
+          echo "=== resolver okru, referer hentaizm2 ==="
+          curl -sL -w "\nHTTP %{http_code}\n" -A "$UA" -H "Referer: https://www.hentaizm2.com/" "https://rcdn.asyazin.com/resolver.php?id=$OK&source=okru" | head -c 800
+          echo
+          echo "=== resolver videa, referer sarmalayici ==="
+          curl -sL -w "\nHTTP %{http_code}\n" -A "$UA" -H "Referer: https://rcdn.asyazin.com/?id=$VD&source=videa" "https://rcdn.asyazin.com/resolver.php?id=$VD&source=videa" | head -c 2500
+          echo
+          echo "=== ok.ru dogrudan GET ==="
+          curl -sL -w "\nHTTP %{http_code}\n" -A "$UA" "https://ok.ru/dk?cmd=videoPlayerMetadata&mid=$OK" | head -c 1500
+          echo
+          echo "=== sarmalayici sayfa, ok.ru kodu ==="
+          curl -sL -A "$UA" -H "Referer: https://www.hentaizm2.com/" "https://rcdn.asyazin.com/?id=$OK&source=okru" -o page.html
+          sed -n '1586,1650p' page.html | cut -c1-200
