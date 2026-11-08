@@ -1,0 +1,20 @@
+name: Probe players
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Okru
+        run: |
+          curl -sL -w "\nHTTP %{http_code}\n" -A "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36" -H "Referer: https://www.hentaizm2.com/" "https://rcdn.asyazin.com/?id=57568933417161&source=okru" | head -c 6000
+
+      - name: Abyss
+        run: |
+          curl -sL -w "\nHTTP %{http_code}\n" -A "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36" -H "Referer: https://www.hentaizm2.com/" "https://oynat.asyaturk.org/?v=Jl0p8Q1uH" | head -c 6000
+
+      - name: Videa
+        run: |
+          curl -sL -w "\nHTTP %{http_code}\n" -A "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36" -H "Referer: https://www.hentaizm2.com/" "https://rcdn.asyazin.com/?id=VOOcpG7RB7Vw3PR2&source=videa" | head -c 6000
