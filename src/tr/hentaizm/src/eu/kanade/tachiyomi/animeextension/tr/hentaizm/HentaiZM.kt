@@ -12,10 +12,12 @@ import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.animesource.online.ParsedAnimeHttpSource
-import eu.kanade.tachiyomi.lib.okruextractor.OkruExtractor
 import eu.kanade.tachiyomi.network.GET
+import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.awaitSuccess
 import eu.kanade.tachiyomi.util.asJsoup
+import okhttp3.FormBody
+import okhttp3.Headers
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import okhttp3.Response
@@ -240,7 +242,6 @@ class HentaiZM : ParsedAnimeHttpSource(), ConfigurableAnimeSource {
 
     // ============================ Video Links =============================
     private val videaExtractor by lazy { VideaExtractor(client) }
-    private val okruExtractor by lazy { OkruExtractor(client) }
 
     // Site kaynak adini ve video kodunu base64 ile sakliyor (kaynak adi ayrica tersine cevrilmis)
     private fun decode(value: String): String {
@@ -248,7 +249,53 @@ class HentaiZM : ParsedAnimeHttpSource(), ConfigurableAnimeSource {
         return String(Base64.decode(padded, Base64.URL_SAFE))
     }
 
-    private fun Throwable.short() = javaClass.simpleName.removeSuffix("Exception").removeSuffix("Error")
+    private fun Throwable.short(): String {
+        val base = javaClass.simpleName.removeSuffix("Exception").removeSuffix("Error")
+        val msg = message ?: return base
+        if (this !is LinkageError) return base
+        val cls = msg.substringAfter("in class L", "").substringBefore(";").substringAfterLast('/')
+        val meth = msg.substringBefore("(").substringAfterLast(' ')
+        return if (cls.isNotBlank()) "$base:$meth@$cls".take(70) else "$base:${msg.take(45)}"
+    }
+
+    private val okruQualities = mapOf(
+        "mobile" to "240p",
+        "lowest" to "360p",
+        "low" to "480p",
+        "sd" to "576p",
+        "hd" to "720p",
+        "full" to "1080p",
+        "quad" to "1440p",
+        "ultra" to "2160p",
+    )
+
+    // Sitenin kendi yaptigi gibi ok.ru'nun bilgi adresini cagirip video linklerini al
+    private fun okruVideos(id: String, errors: MutableList<String>): List<Video> {
+        val reqHeaders = headersBuilder()
+            .set("Origin", "https://rcdn.asyazin.com")
+            .set("Referer", "https://rcdn.asyazin.com/")
+            .build()
+        val body = FormBody.Builder().add("mid", id).build()
+
+        val json = client.newCall(
+            POST("https://ok.ru/dk?cmd=videoPlayerMetadata&mid=$id", reqHeaders, body),
+        ).execute().use { it.jsonBody() }
+
+        val arr = json.optJSONArray("videos")
+        if (arr == null || arr.length() == 0) {
+            errors += "okmeta=bos:" + json.keys().asSequence().take(5).joinToString(",")
+            return emptyList()
+        }
+
+        val playHeaders = Headers.Builder().add("User-Agent", headers["User-Agent"] ?: "").build()
+        return (0 until arr.length()).mapNotNull { i ->
+            val v = arr.getJSONObject(i)
+            val url = v.optString("url")
+            if (url.isBlank()) return@mapNotNull null
+            val name = v.optString("name")
+            Video(url, "OK.ru ${okruQualities[name] ?: name}", url, headers = playHeaders)
+        }
+    }
 
     override fun videoListParse(response: Response): List<Video> {
         val doc = response.asJsoup()
@@ -268,21 +315,9 @@ class HentaiZM : ParsedAnimeHttpSource(), ConfigurableAnimeSource {
 
         // Once VIP (Ok.ru) kaynagi
         val okru = sources.filter { it.first == "okru" }.flatMap { (_, id) ->
-            val url = "https://ok.ru/videoembed/$id"
-
-            // Teshis: ok.ru sayfasina dogrudan bak
-            runCatching {
-                client.newCall(GET(url, headers)).execute().use { r ->
-                    val body = r.peekBody(Long.MAX_VALUE).string()
-                    errors += "ok.ru=${r.code},opt=${body.contains("data-options")}"
-                }
-            }.onFailure { errors += "ok.ru=${it.short()}" }
-
-            val list = runCatching { okruExtractor.videosFromUrl(url) }
+            runCatching { okruVideos(id, errors) }
                 .onFailure { errors += "okru=${it.short()}" }
                 .getOrDefault(emptyList())
-            if (list.isEmpty() && errors.none { it.startsWith("okru=") }) errors += "okru=bos"
-            list
         }
         if (okru.isNotEmpty()) return okru
 
