@@ -1,0 +1,18 @@
+name: Probe 2
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Okru sayfa
+        run: |
+          UA="Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"
+          curl -sL -A "$UA" -H "Referer: https://www.hentaizm2.com/" "https://rcdn.asyazin.com/?id=57568933417161&source=okru" -o page.html
+          echo "BOYUT: $(wc -c < page.html)"
+          echo "--- script satirlari ---"
+          grep -n "<script" page.html | cut -c1-200 | head -15
+          echo "--- ilgili satirlar ---"
+          grep -n -i -E "m3u8|\.mp4|ok\.ru|okru|fetch\(|/api|\.php|sources|videoUrl|hls|token" page.html | cut -c1-220 | head -40
