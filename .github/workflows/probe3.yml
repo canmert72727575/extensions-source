@@ -1,0 +1,19 @@
+name: Probe 3
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Okru sayfa
+        run: |
+          UA="Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"
+          curl -sL -A "$UA" -H "Referer: https://www.hentaizm2.com/" "https://rcdn.asyazin.com/?id=57568933417161&source=okru" -o page.html
+          echo "=== ag ve adres satirlari ==="
+          grep -n -E "URLSearchParams|atob\(|XMLHttpRequest|fetch\(|okcdn|vkuser|videoembed|ok\.ru|apiUrl|endpoint|document\.referrer|ajax|\.php|/api/" page.html | cut -c1-220 | head -50
+          echo "=== baslangic degiskenleri (440-475) ==="
+          sed -n '440,475p' page.html | cut -c1-200
+          echo "=== son baslatma kodu (1820-1887) ==="
+          sed -n '1820,1887p' page.html | cut -c1-200
