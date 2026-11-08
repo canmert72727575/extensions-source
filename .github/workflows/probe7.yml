@@ -1,0 +1,15 @@
+name: Probe 7
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Abyss tam sayfa
+        run: |
+          UA="Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+          curl -sL -A "$UA" -H "Referer: https://www.hentaizm2.com/" "https://oynat.asyaturk.org/?v=Hu1Q8p0lJ" -o ab.html
+          echo "BOYUT: $(wc -c < ab.html)"
+          cat ab.html
